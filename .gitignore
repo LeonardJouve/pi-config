@@ -1,1 +1,6 @@
-agent/**/*
+agent/bin
+agent/sessions
+agent/*.json
+node_modules
+superpowers
+.superpowers

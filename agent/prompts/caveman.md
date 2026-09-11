@@ -1,0 +1,5 @@
+---
+description: Switch caveman intensity level (lite/full/ultra/off)
+---
+
+Switch to caveman {{args}} mode. If no level specified, use full. Apply that level's rules from the caveman skill — the hooks inject them for you. Never substitute another level's rules for the one named. True at every level: no filler, no hedging, no pleasantries, no preamble or recap. Technical terms exact. Code unchanged.
