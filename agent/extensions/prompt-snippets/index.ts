@@ -12,10 +12,12 @@
  * - When a message is sent, active snippet bodies are prepended/appended to
  *   the message text in order (prepend group sorted by `order` first, then
  *   the typed text, then the append group sorted by `order`).
- * - Toggles reset to all-off after each send and at session start.
+ * - Toggles stay on until you untoggle them, and the confirmed selection is
+ *   persisted to `state.json` next to this file and restored at session start
+ *   for interactive sessions only (never for `pi -p`).
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -33,6 +35,7 @@ interface Snippet {
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const snippetsDir = join(extensionDir, "snippets");
+const stateFile = join(extensionDir, "state.json");
 const WIDGET_ID = "prompt-snippets";
 
 function parseSnippet(filename: string, raw: string): Snippet | null {
@@ -59,6 +62,21 @@ function parseSnippet(filename: string, raw: string): Snippet | null {
 	};
 }
 
+/** Read the persisted selection. Returns [] when the state file is missing or unreadable. */
+function readState(): string[] {
+	try {
+		const raw = JSON.parse(readFileSync(stateFile, "utf8"));
+		return Array.isArray(raw.enabled) ? raw.enabled : [];
+	} catch {
+		return [];
+	}
+}
+
+/** Persist the selection. Throws an error on failure. */
+function writeState(ids: string[]): void {
+	writeFileSync(stateFile, `${JSON.stringify({ enabled: ids }, null, 2)}\n`, "utf8");
+}
+
 /** Load all snippets, sorted: prepend group first, append group last, each by (order, name). */
 function loadSnippets(): Snippet[] {
 	if (!existsSync(snippetsDir)) return [];
@@ -82,7 +100,7 @@ function loadSnippets(): Snippet[] {
 export default function (pi: ExtensionAPI) {
 	// Snippets last seen on disk (sorted). Refreshed whenever the menu opens or a message is sent.
 	let snippets: Snippet[] = [];
-	// Ids of currently toggled snippets. Resets to empty after each send and at session start.
+	// Ids of currently toggled snippets. Sticky: survives sends, sessions, and restarts via state.json.
 	let enabled = new Set<string>();
 
 	function updateWidget(ctx: ExtensionContext) {
@@ -280,14 +298,23 @@ export default function (pi: ExtensionAPI) {
 
 		if (confirmed) {
 			enabled = working;
+			try {
+				writeState([...enabled]);
+			} catch (error) {
+				ctx.ui.notify(`Could not save snippet selection: ${error}`, "warning");
+			}
 		}
 		updateWidget(ctx);
 	}
 
 	pi.on("session_start", (_event, ctx) => {
-		enabled = new Set();
 		snippets = loadSnippets();
 		if (!existsSync(snippetsDir)) mkdirSync(snippetsDir, { recursive: true });
+		// Restore the persisted selection for interactive sessions only, so a saved
+		// selection never leaks into non-interactive `pi -p` prompts. Ids are dropped
+		// in memory rather than rewritten, so re-adding a snippet file restores its toggle.
+		const known = new Set(snippets.map((s) => s.id));
+		enabled = new Set(ctx.hasUI ? readState().filter((id) => known.has(id)) : []);
 		updateWidget(ctx);
 	});
 
@@ -296,7 +323,6 @@ export default function (pi: ExtensionAPI) {
 
 		snippets = loadSnippets();
 		const active = snippets.filter((s) => enabled.has(s.id));
-		enabled = new Set();
 		updateWidget(ctx);
 
 		if (active.length === 0) return; // all toggled snippets vanished from disk

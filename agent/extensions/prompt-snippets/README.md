@@ -20,7 +20,14 @@ standalone instruction — toggle exactly the ones you want per message.
 - When you send a message, active snippet bodies are merged into the message
   text: prepend group (sorted by `order`) → your text → append group (sorted
   by `order`), separated by blank lines.
-- Toggles reset to **all off** after each send and at session start.
+- Toggles are **sticky**: they stay on after each send until you untoggle them,
+  and the selection you confirm with `enter` is saved to `state.json` next to
+  `index.ts` and restored at session start — across new sessions and restarts.
+  `esc` still discards uncommitted changes.
+- Restore only happens for interactive sessions (TUI/RPC). Non-interactive
+  `pi -p` runs always start with nothing selected.
+- Snippet files that disappear from disk stop applying, but their ids stay in
+  `state.json`, so restoring the file brings the toggle back.
 
 ## Snippet files
 

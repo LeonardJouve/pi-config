@@ -1,0 +1,7 @@
+{
+  "lastChangelogVersion": "0.85.1",
+  "defaultProvider": "qwen-token-plan",
+  "defaultModel": "qwen3.8-flash",
+  "defaultThinkingLevel": "xhigh",
+  "packages": []
+}
