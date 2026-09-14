@@ -1,6 +1,8 @@
 agent/bin
 agent/sessions
 agent/*.json
+agent/extensions/prompt-snippets/state.json
+!agent/settings.json
 node_modules
 superpowers
 .superpowers
