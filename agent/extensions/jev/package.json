@@ -1,0 +1,32 @@
+{
+  "name": "pi-jev",
+  "version": "0.1.0",
+  "description": "Fast typed decisions for pi agents via Vercel AI SDK + TypeSafe AI's Jev evaluation model.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "jev",
+    "evaluation",
+    "decision"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.89",
+    "ai": "^7.0.111"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

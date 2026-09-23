@@ -48,6 +48,19 @@ export function getShellReadyDelayMs(env: NodeJS.ProcessEnv = process.env): numb
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
 }
 
+/** Default number of subagents allowed to run at the same time. */
+export const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 2;
+
+/**
+ * Concurrency cap for spawned subagents. Requests beyond the cap wait in a
+ * FIFO queue and start automatically as running subagents finish.
+ */
+export function getMaxConcurrentSubagents(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.PI_SUBAGENT_MAX_CONCURRENT?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : DEFAULT_MAX_CONCURRENT_SUBAGENTS;
+}
+
 /**
  * Internal artifact directory path for a session.
  * Path convention: <sessionDir>/artifacts/<session-id>/

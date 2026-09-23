@@ -13,13 +13,34 @@ Call `subagent()` and it **returns immediately**. The sub-agent runs in its own 
 ╰────────────────────────────────────────────────────╯
 ```
 
-For parallel execution, call `subagent` multiple times — they all run concurrently:
+For parallel execution, call `subagent` multiple times — up to the concurrency cap runs at once:
 
 ```typescript
 subagent({ name: "Scout: Auth", agent: "scout", task: "Analyze auth module" });
 subagent({ name: "Scout: DB", agent: "scout", task: "Map database schema" });
 // Both return immediately, results steer back independently
 ```
+
+### Concurrency cap
+
+At most **2** subagents run at the same time (1 orchestrator + 2 children). Extra `subagent` calls are **not rejected** — they are queued FIFO and launched automatically the moment a running subagent finishes, so you can fire off five at once and let the harness serialize them. Queued calls return `status: "queued"` with their position, and their results are delivered exactly like a launched one.
+
+```
+╭─ Subagents ────────────────────── 2 running, 2 queued ─╮
+│ 00:23  Scout: Auth (scout)                     running… │
+│ 00:45  Research: DB (researcher)               running… │
+│  --    Scout: API (scout)                       queued… │
+│  --    Worker: Tests (worker)                   queued… │
+╰─────────────────────────────────────────────────────────╯
+```
+
+Change the cap with `PI_SUBAGENT_MAX_CONCURRENT` (minimum 1):
+
+```bash
+export PI_SUBAGENT_MAX_CONCURRENT=4
+```
+
+`subagent_resume` skips the queue (explicit one-off action) but counts toward the cap.
 
 ## Install
 
@@ -77,10 +98,11 @@ Agent discovery follows priority: **project-local** (`.pi/agents/`) > **global**
 ## Async flow
 
 ```
-1. Agent calls subagent()          → returns immediately ("started")
-2. Sub-agent runs in a WezTerm pane → widget shows it running
+1. Agent calls subagent()          → returns immediately ("started", or "queued" if the cap is hit)
+2. Sub-agent runs in a WezTerm pane → widget shows it running (queued items wait for a slot)
 3. User keeps chatting              → main session fully interactive
-4. Sub-agent finishes               → result steered back as completion/failure
+4. Sub-agent finishes               → result steered back as completion/failure,
+                                      and the next queued subagent is launched
 5. Main agent processes result      → continues with new context
 ```
 
@@ -133,6 +155,7 @@ index.ts          # extension factory: tools, commands, renderers, per-instance
                   #   runtime state (running map, widget, abort controller)
 agents.ts         # agent definition parsing/discovery + spawn-mode resolution
 launch.ts         # pure command/env/artifact builders + interrupt resolution
+queue.ts          # concurrency cap: FIFO queue of spawns waiting for a slot
 widget.ts         # running-subagents widget rendering + lifecycle controller
 wezterm.ts        # WezTerm pane control (create/send/read/close, poll for exit)
 shell.ts          # shell quoting + exit-sentinel constants

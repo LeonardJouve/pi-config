@@ -10,6 +10,8 @@ export interface WidgetAgent {
   name: string;
   agent?: string;
   startTime: number;
+  /** Waiting for a free concurrency slot instead of actually running. */
+  queued?: boolean;
 }
 
 /** Minimal component contract expected by ctx.ui.setWidget factories. */
@@ -68,15 +70,20 @@ export function borderBottom(width: number): string {
 }
 
 export function renderSubagentWidgetLines(agents: WidgetAgent[], width: number): string[] {
-  const count = agents.length;
+  const queued = agents.filter((agent) => agent.queued).length;
+  const running = agents.length - queued;
   const title = "Subagents";
-  const info = `${count} running`;
+  const info = queued > 0 ? `${running} running, ${queued} queued` : `${running} running`;
 
   const lines: string[] = [borderTop(title, info, width)];
 
   for (const agent of agents) {
-    const elapsed = formatElapsedMMSS(agent.startTime);
     const agentTag = agent.agent ? ` (${agent.agent})` : "";
+    if (agent.queued) {
+      lines.push(borderLine(` --  ${agent.name}${agentTag} `, " queued… ", width));
+      continue;
+    }
+    const elapsed = formatElapsedMMSS(agent.startTime);
     const left = ` ${elapsed}  ${agent.name}${agentTag} `;
     lines.push(borderLine(left, " running… ", width));
   }

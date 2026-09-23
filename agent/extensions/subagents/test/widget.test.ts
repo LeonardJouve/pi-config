@@ -66,6 +66,26 @@ test("renderSubagentWidgetLines produces a bordered box", () => {
   assert.ok(lines[2].includes("01:05"));
 });
 
+test("renderSubagentWidgetLines shows queued agents separately", () => {
+  const now = Date.now();
+  const lines = renderSubagentWidgetLines(
+    [
+      { name: "Scout: Auth", agent: "scout", startTime: now - 23_000 },
+      { name: "Worker: B", startTime: now, queued: true },
+      { name: "Worker: C", agent: "worker", startTime: now, queued: true },
+    ],
+    50,
+  );
+  assert.equal(lines.length, 5); // top + 1 running + 2 queued + bottom
+  for (const line of lines) assert.equal(visibleWidth(line), 50);
+  assert.ok(lines[0].includes("1 running, 2 queued"));
+  assert.ok(lines[1].includes("00:23"));
+  assert.ok(lines[1].includes("running…"));
+  assert.ok(lines[2].includes("queued…"));
+  assert.ok(!lines[2].includes("running…"));
+  assert.ok(lines[3].includes("(worker)"));
+});
+
 test("widget controller sets and clears the widget", (t) => {
   t.mock.timers.enable({ apis: ["setInterval"], now: 0 });
 
