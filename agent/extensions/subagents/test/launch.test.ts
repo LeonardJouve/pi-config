@@ -13,6 +13,7 @@ import {
   formatElapsed,
   formatElapsedMMSS,
   getArtifactDir,
+  getMaxConcurrentSubagents,
   getShellReadyDelayMs,
   handleSubagentInterrupt,
   resolveInterruptTarget,
@@ -66,6 +67,14 @@ test("getShellReadyDelayMs honors env overrides", () => {
   assert.equal(getShellReadyDelayMs({ PI_SUBAGENT_SHELL_READY_DELAY_MS: "0" }), 0);
   assert.equal(getShellReadyDelayMs({ PI_SUBAGENT_SHELL_READY_DELAY_MS: "abc" }), 500);
   assert.equal(getShellReadyDelayMs({ PI_SUBAGENT_SHELL_READY_DELAY_MS: "-5" }), 500);
+});
+
+test("getMaxConcurrentSubagents defaults to 2 and honors env overrides", () => {
+  assert.equal(getMaxConcurrentSubagents({}), 2);
+  assert.equal(getMaxConcurrentSubagents({ PI_SUBAGENT_MAX_CONCURRENT: "4" }), 4);
+  assert.equal(getMaxConcurrentSubagents({ PI_SUBAGENT_MAX_CONCURRENT: "1" }), 1);
+  assert.equal(getMaxConcurrentSubagents({ PI_SUBAGENT_MAX_CONCURRENT: "0" }), 2);
+  assert.equal(getMaxConcurrentSubagents({ PI_SUBAGENT_MAX_CONCURRENT: "abc" }), 2);
 });
 
 test("getArtifactDir joins session dir and id", () => {

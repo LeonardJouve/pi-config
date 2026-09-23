@@ -6,3 +6,6 @@ agent/extensions/prompt-snippets/state.json
 node_modules
 superpowers
 .superpowers
+*.log
+ssh-remote-memories
+.firecrawl

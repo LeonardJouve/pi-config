@@ -34,6 +34,7 @@ import {
   buildSubagentToolAllowlist,
   formatElapsed,
   getArtifactDir,
+  getMaxConcurrentSubagents,
   getShellReadyDelayMs,
   handleSubagentInterrupt,
   resolveResultPresentation,
@@ -43,6 +44,7 @@ import {
   type LaunchCommandResult,
 } from "./launch.ts";
 import { createWidgetController, type WidgetController } from "./widget.ts";
+import { createSpawnQueue } from "./queue.ts";
 import type { RunningSubagent, SubagentResult } from "./types.ts";
 import {
   countEntries,
@@ -124,6 +126,28 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   /** Aborted on session_shutdown to stop all watchers belonging to this instance. */
   let instanceAbort = new AbortController();
 
+  /** How many subagents may run at once (1 orchestrator + this many children). */
+  const maxConcurrent = getMaxConcurrentSubagents();
+
+  /** Caps concurrent spawns; extras wait here and start as slots free up. */
+  const spawnQueue = createSpawnQueue({
+    maxConcurrent,
+    runningCount: () => runningSubagents.size,
+    onChange: () => syncWidget(),
+    onStartFailure: (item, error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      pi.sendMessage(
+        {
+          customType: "subagent_result",
+          content: `Sub-agent "${item.name}" failed to start: ${message}`,
+          display: true,
+          details: { name: item.name, error: message },
+        },
+        { triggerTurn: true, deliverAs: "steer" },
+      );
+    },
+  });
+
   const agentDirs = defaultAgentDirs(join(SUBAGENTS_DIR, "../../agents"));
 
   function ensureInstanceArmed(): void {
@@ -133,17 +157,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   }
 
   const widget: WidgetController = createWidgetController({
-    getAgents: () => [...runningSubagents.values()],
+    getAgents: () => [
+      ...runningSubagents.values(),
+      ...spawnQueue.pending().map((item) => ({
+        name: item.name,
+        agent: item.agent,
+        startTime: item.enqueuedAt,
+        queued: true,
+      })),
+    ],
     setWidget: (id, factory) => {
       if (!latestCtx?.hasUI) return;
       latestCtx.ui.setWidget(id, factory as any, { placement: "aboveEditor" });
     },
   });
 
-  /** Refresh the widget; stop the refresh timer once nothing is running. */
+  /** Refresh the widget; stop the refresh timer once nothing runs or waits. */
   function syncWidget(): void {
     widget.refresh();
-    if (runningSubagents.size === 0) {
+    if (runningSubagents.size === 0 && spawnQueue.pending().length === 0) {
       widget.stop();
     }
   }
@@ -163,6 +195,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       agent.abortController?.abort();
     }
     runningSubagents.clear();
+    spawnQueue.clear();
   });
 
   // Tools denied via PI_DENY_TOOLS env var (set by parent agent based on frontmatter)
@@ -342,6 +375,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       }
       runningSubagents.delete(running.id);
       syncWidget();
+      // A slot just freed — start whatever is waiting in the queue.
+      void spawnQueue.drain();
     };
 
     try {
@@ -488,7 +523,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     "When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
     "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. " +
     "DO NOT fabricate, assume, or summarize results after calling this tool. " +
-    "After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.";
+    "After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready. " +
+    `At most ${maxConcurrent} subagents run concurrently. Extra calls are NOT rejected — they are queued (status "queued") and launched automatically as soon as a running subagent finishes, so you can spawn several at once and let the harness serialize them.`;
 
   if (shouldRegister("subagent"))
     pi.registerTool({
@@ -533,13 +569,45 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // never watch on an aborted instance controller.
         ensureInstanceArmed();
 
-        // Launch the subagent (creates pane, sends command)
-        const running = await launchSubagent(params, ctx);
+        // Concurrency cap: launch now if a slot is free, otherwise queue it.
+        // The watcher calls drain() when a subagent finishes, which starts
+        // whatever is waiting — the caller never has to retry.
+        const outcome = await spawnQueue.schedule({
+          name: params.name,
+          agent: params.agent,
+          start: async () => {
+            const running = await launchSubagent(params, ctx);
+            // Fire-and-forget: watch in the background, deliver on completion.
+            watchAndDeliver(running);
+            return running;
+          },
+        });
 
-        // Fire-and-forget: start watching in background
-        watchAndDeliver(running);
+        if (outcome.queued) {
+          widget.start();
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Sub-agent "${params.name}" QUEUED at position ${outcome.position} — at most ${maxConcurrent} subagents run concurrently and every slot is busy. ` +
+                  `It starts automatically when a running subagent finishes; do NOT re-issue this call and do NOT poll for a free slot. ` +
+                  `Do NOT generate or assume any results — they will be delivered to you automatically as a steer message, exactly like a launched sub-agent.`,
+              },
+            ],
+            details: {
+              name: params.name,
+              task: params.task,
+              agent: params.agent,
+              status: "queued",
+              position: outcome.position,
+              maxConcurrent,
+            },
+          };
+        }
 
         // Return immediately
+        const running = outcome.value;
         return {
           content: [
             {
@@ -596,12 +664,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const details = result.details as any;
         const name = details?.name ?? "(unnamed)";
 
-        if (details?.status === "started") {
+        if (details?.status === "started" || details?.status === "queued") {
+          const suffix =
+            details.status === "queued" ? ` — queued (#${details.position ?? "?"})` : " — started";
           return new Text(
             theme.fg("accent", "▸") +
               " " +
               theme.fg("toolTitle", theme.bold(name)) +
-              theme.fg("dim", " — started"),
+              theme.fg("dim", suffix),
             0,
             0,
           );
@@ -840,7 +910,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const resumeBatch = typeof resumeLaunch === "object" ? resumeLaunch.batchFile : undefined;
         sendPaste(surface, resumeCmd);
 
-        // Register as a running subagent for widget tracking
+        // Register as a running subagent for widget tracking.
+        // ponytail: resume skips the queue (explicit one-off action) but counts
+        // toward the cap, so spawns queue behind it. Queue resumes too if that
+        // ever bites.
         const running: RunningSubagent = {
           id,
           name,

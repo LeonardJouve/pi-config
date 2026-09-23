@@ -1,0 +1,12 @@
+{
+  "name": "pi-extension-browser",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Snippets extension for pi.",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {
+  }
+}
